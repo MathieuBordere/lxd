@@ -407,27 +407,33 @@ func (g *Gateway) DialFunc() client.DialFunc {
 // Dial function for establishing raft connections.
 func (g *Gateway) raftDial() client.DialFunc {
 	return func(ctx context.Context, address string) (net.Conn, error) {
+		fmt.Fprintf(os.Stderr, "raftDial %v\n", address)
 		nodeAddress, err := g.nodeAddress(address)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "raftDial nodeAddress failed%v\n", address)
 			return nil, err
 		}
 		conn, err := dqliteNetworkDial(ctx, nodeAddress, g)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "raftDial dqliteNetworkDial failed%v\n", address)
 			return nil, err
 		}
 
 		listener, err := net.Listen("unix", "")
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "raftDial net.Listen failed%v\n", address)
 			return nil, errors.Wrap(err, "Failed to create unix listener")
 		}
 
 		goUnix, err := net.Dial("unix", listener.Addr().String())
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "raftDial net.Dial failed%v\n", address)
 			return nil, errors.Wrap(err, "Failed to connect to unix listener")
 		}
 
 		cUnix, err := listener.Accept()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "raftDial listener.Accept() failed%v\n", address)
 			return nil, errors.Wrap(err, "Failed to connect to unix listener")
 		}
 
@@ -909,8 +915,10 @@ func (g *Gateway) nodeAddress(raftAddress string) (string, error) {
 }
 
 func dqliteNetworkDial(ctx context.Context, addr string, g *Gateway) (net.Conn, error) {
+	fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v\n", addr)
 	config, err := tlsClientConfig(g.cert)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v tlsClientConfig fail\n", addr)
 		return nil, err
 	}
 
@@ -927,6 +935,7 @@ func dqliteNetworkDial(ctx context.Context, addr string, g *Gateway) (net.Conn, 
 	}
 	request.URL, err = url.Parse(path)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v url.Parse fail\n", addr)
 		return nil, err
 	}
 
@@ -939,16 +948,19 @@ func dqliteNetworkDial(ctx context.Context, addr string, g *Gateway) (net.Conn, 
 
 	conn, err := tls.DialWithDialer(dialer, "tcp", addr, config)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v tls.Dial fail\n", addr)
 		return nil, errors.Wrap(err, "Failed to connect to HTTP endpoint")
 	}
 
 	err = request.Write(conn)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v request.Write fail\n", addr)
 		return nil, errors.Wrap(err, "Sending HTTP request failed")
 	}
 
 	response, err := http.ReadResponse(bufio.NewReader(conn), request)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v read response fail\n", addr)
 		return nil, errors.Wrap(err, "Failed to read response")
 	}
 
@@ -963,16 +975,20 @@ func dqliteNetworkDial(ctx context.Context, addr string, g *Gateway) (net.Conn, 
 				g.upgradeTriggered = true
 			}
 		}
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v upgrade needed\n", addr)
 		return nil, fmt.Errorf("Upgrade needed")
 	}
 
 	if response.StatusCode != http.StatusSwitchingProtocols {
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v expected status 101\n", addr)
 		return nil, fmt.Errorf("Dialing failed: expected status code 101 got %d", response.StatusCode)
 	}
 	if response.Header.Get("Upgrade") != "dqlite" {
+		fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v missing or unexpected Upgrade header\n", addr)
 		return nil, fmt.Errorf("Missing or unexpected Upgrade header in response")
 	}
 
+	fmt.Fprintf(os.Stderr, "dqliteNetworkDial %v success\n", addr)
 	return conn, nil
 }
 
@@ -1009,6 +1025,7 @@ func runDqliteProxy(stopCh chan struct{}, bindAddress string, acceptCh chan net.
 		remote := <-acceptCh
 		local, err := net.Dial("unix", bindAddress)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "runDqliteProxy net.Dial failed\n")
 			continue
 		}
 
@@ -1061,6 +1078,7 @@ func dqliteProxy(stopCh chan struct{}, remote net.Conn, local net.Conn) {
 		}
 		remote.Close()
 		local.Close()
+		fmt.Fprintf(os.Stderr, "dqliteProxy remoteToLocal failure\n")
 	case err := <-localToRemote:
 		if err != nil {
 			errs[0] = fmt.Errorf("local -> remote: %v", err)
@@ -1070,13 +1088,16 @@ func dqliteProxy(stopCh chan struct{}, remote net.Conn, local net.Conn) {
 			errs[1] = fmt.Errorf("remote -> local: %v", err)
 		}
 		local.Close()
-
+		fmt.Fprintf(os.Stderr, "dqliteProxy localToRemote failure\n")
 	}
 
 	if errs[0] != nil || errs[1] != nil {
 		err := dqliteProxyError{first: errs[0], second: errs[1]}
+		fmt.Fprintf(os.Stderr, "dqliteProxy failure\n")
 		logger.Warnf("Dqlite proxy: %v", err)
 	}
+
+	fmt.Fprintf(os.Stderr, "dqliteProxy exit\n")
 }
 
 type dqliteProxyError struct {
