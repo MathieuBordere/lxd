@@ -774,6 +774,12 @@ func Leave(state *state.State, gateway *Gateway, name string, force bool) (strin
 		return "", errors.Wrap(err, "Failed to leave the cluster")
 	}
 
+	raftNodes, err := gateway.currentRaftNodes()
+	if err != nil {
+		return "", err
+	}
+	logger.Debugf("Leave Done - raft nodes: %+v", raftNodes)
+
 	return address, nil
 }
 
